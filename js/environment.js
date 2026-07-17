@@ -58,6 +58,7 @@ export class Environment {
     this._buildGrass(holePositions);
     this._buildFlowers(holePositions);
     this._buildTrees();
+    this._buildTreeline();
     this._buildFences();
     this._buildRocks();
     this._buildClouds();
@@ -138,11 +139,11 @@ export class Environment {
     const sun = new THREE.DirectionalLight(0xfff2dd, 2.2);
     sun.position.set(-32, 52, 42);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
-    sun.shadow.camera.left = -48;
-    sun.shadow.camera.right = 48;
-    sun.shadow.camera.top = 48;
-    sun.shadow.camera.bottom = -48;
+    sun.shadow.mapSize.set(1024, 1024);
+    sun.shadow.camera.left = -40;
+    sun.shadow.camera.right = 40;
+    sun.shadow.camera.top = 40;
+    sun.shadow.camera.bottom = -40;
     sun.shadow.camera.near = 5;
     sun.shadow.camera.far = 140;
     sun.shadow.bias = -0.0004;
@@ -244,7 +245,7 @@ export class Environment {
       const x = Math.sin(a) * r;
       const z = -Math.cos(a) * r;
       // Keep blades off the hole mounds.
-      if (holePositions.some((p) => (p.x - x) ** 2 + (p.z - z) ** 2 < 1.1)) continue;
+      if (holePositions.some((p) => (p.x - x) ** 2 + (p.z - z) ** 2 < 2.9)) continue;
       dummy.position.set(x, 0, z);
       dummy.rotation.y = Math.random() * Math.PI;
       const s = rand(0.7, 1.5);
@@ -284,7 +285,7 @@ export class Environment {
       const r = 3 + Math.pow(Math.random(), 0.8) * 40;
       const x = Math.sin(a) * r;
       const z = -Math.cos(a) * r;
-      if (holePositions.some((p) => (p.x - x) ** 2 + (p.z - z) ** 2 < 1.4)) continue;
+      if (holePositions.some((p) => (p.x - x) ** 2 + (p.z - z) ** 2 < 2.9)) continue;
       dummy.position.set(x, 0, z);
       dummy.rotation.y = Math.random() * Math.PI;
       const s = rand(0.7, 1.3);
@@ -316,8 +317,8 @@ export class Environment {
     tree.add(trunk);
     this.raycastTargets.push(trunk);
 
-    const greens = [0x3e6b2f, 0x4a7d36, 0x55873c, 0x447336];
-    const blobs = randInt(3, 5);
+    const greens = [0x3e6b2f, 0x4a7d36, 0x55873c, 0x447336, 0x5d9240];
+    const blobs = randInt(4, 6);
     for (let i = 0; i < blobs; i++) {
       const r = rand(0.9, 1.5) * scale;
       const geo = new THREE.IcosahedronGeometry(r, 1);
@@ -361,6 +362,28 @@ export class Environment {
       this.scene.add(tree);
       this.canopies.push(new THREE.Vector3(x, rand(2.4, 4.2) * s, z));
     }
+  }
+
+  // ------------------------------------------------- distant treeline ring --
+  _buildTreeline() {
+    // Silhouetted conifers far out — cheap depth cue, swallowed by the fog.
+    const geo = new THREE.ConeGeometry(1, 1, 6);
+    const mat = new THREE.MeshLambertMaterial({ color: 0x2e4d28 });
+    const COUNT = 26;
+    const mesh = new THREE.InstancedMesh(geo, mat, COUNT);
+    const dummy = new THREE.Object3D();
+    for (let i = 0; i < COUNT; i++) {
+      const a = (i / COUNT) * Math.PI * 2 + rand(-0.1, 0.1);
+      const r = rand(95, 135);
+      const h = rand(16, 30);
+      dummy.position.set(Math.sin(a) * r, h / 2 - 0.5, -Math.cos(a) * r);
+      dummy.scale.set(rand(5, 9), h, rand(5, 9));
+      dummy.rotation.y = Math.random() * Math.PI;
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    this.scene.add(mesh);
   }
 
   // --------------------------------------------------------------- fences --
