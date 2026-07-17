@@ -1,0 +1,14 @@
+{
+  "name": "whack-a-bunny",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "description": "A polished browser FPS whack-a-mole game. Serve statically, e.g. python -m http.server",
+  "scripts": {
+    "serve": "python -m http.server 8123",
+    "test": "node test/e2e.mjs"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^25.3.0"
+  }
+}
