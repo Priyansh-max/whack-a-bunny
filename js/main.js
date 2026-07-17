@@ -48,9 +48,20 @@ async function boot() {
   await nextFrame();
 
   // --- Renderer -------------------------------------------------------------
-  const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+  // antialias is useless with an EffectComposer (geometry renders into an
+  // offscreen target), so skip it and let the resolution scaler do the work.
+  const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
   renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
+
+  // Adaptive quality: step the pixel ratio up/down to hold 70+ FPS.
+  const QUALITY_STEPS = [1.5, 1.25, 1.0, 0.85];
+  let qualityIndex = Math.min(window.devicePixelRatio, 2) >= 1.5 ? 0 : 1;
+  function applyQuality() {
+    const pr = Math.min(window.devicePixelRatio || 1, QUALITY_STEPS[qualityIndex]);
+    renderer.setPixelRatio(pr);
+    composer.setPixelRatio(pr);
+    composer.setSize(window.innerWidth, window.innerHeight);
+  }
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -90,13 +101,21 @@ async function boot() {
   // --- Post-processing (bloom) ----------------------------------------------
   const composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
+  // Half-resolution bloom: visually identical for this art style, much cheaper.
   const bloom = new UnrealBloomPass(
-    new THREE.Vector2(window.innerWidth, window.innerHeight), 0.32, 0.65, 0.82
+    new THREE.Vector2(window.innerWidth / 2, window.innerHeight / 2), 0.32, 0.65, 0.82
   );
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
+  applyQuality();
 
   game = new Game({ scene, camera, renderer, env, manager, weapon, particles, decals, shake, ui: uiRef, tracers });
+
+  // Dirt poof when a bunny pops out — draws the eye to the hole.
+  const _poofDir = new THREE.Vector3(0, 1, 0);
+  manager.onBunnyPop = (pos) => {
+    particles.dirt(new THREE.Vector3(pos.x, pos.y + 0.15, pos.z), _poofDir);
+  };
   uiRef.setLoadProgress(1);
   await nextFrame();
 
@@ -140,12 +159,28 @@ async function boot() {
   let elapsed = 0;
   let fpsFrames = 0;
   let fpsTime = 0;
+  let tuneAccum = 0;
+  let tuneSamples = 0;
+  let lastTune = performance.now() + 4000; // warmup before auto-tuning kicks in
 
   renderer.setAnimationLoop(() => {
+    const rawDt = Math.min(clock.getDelta(), 0.05);
     // Hit-stop: brief global slow-down when a bunny is whacked.
     const slowmo = performance.now() < game.hitStopUntil ? 0.12 : 1;
-    const dt = Math.min(clock.getDelta(), 0.05) * slowmo;
+    const dt = rawDt * slowmo;
     elapsed += dt;
+
+    // Auto-tune quality every 2.5 s to hold 70+ FPS (after a warmup).
+    tuneAccum += 1 / Math.max(rawDt, 1e-4);
+    tuneSamples++;
+    if (performance.now() - lastTune > 2500) {
+      const avg = tuneAccum / tuneSamples;
+      if (avg < 58 && qualityIndex < QUALITY_STEPS.length - 1) { qualityIndex++; applyQuality(); }
+      else if (avg > 75 && qualityIndex > 0) { qualityIndex--; applyQuality(); }
+      tuneAccum = 0;
+      tuneSamples = 0;
+      lastTune = performance.now();
+    }
 
     updateTweens(dt);
     env.update(dt, elapsed);
