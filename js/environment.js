@@ -8,6 +8,32 @@ import { rand, randInt, pick } from './utils.js';
 
 const GROUND_RADIUS = 70;
 
+/** Minimal indexed-geometry merge (position/normal/uv) for simple plane parts. */
+function mergeGeoms(geos) {
+  let vCount = 0, iCount = 0;
+  for (const g of geos) { vCount += g.attributes.position.count; iCount += g.index.count; }
+  const pos = new Float32Array(vCount * 3);
+  const norm = new Float32Array(vCount * 3);
+  const uv = new Float32Array(vCount * 2);
+  const idx = new Uint16Array(iCount);
+  let vo = 0, io = 0;
+  for (const g of geos) {
+    pos.set(g.attributes.position.array, vo * 3);
+    norm.set(g.attributes.normal.array, vo * 3);
+    uv.set(g.attributes.uv.array, vo * 2);
+    const gi = g.index.array;
+    for (let i = 0; i < gi.length; i++) idx[io + i] = gi[i] + vo;
+    vo += g.attributes.position.count;
+    io += gi.length;
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  out.setAttribute('normal', new THREE.BufferAttribute(norm, 3));
+  out.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  out.setIndex(new THREE.BufferAttribute(idx, 1));
+  return out;
+}
+
 export class Environment {
   /**
    * @param {THREE.Scene} scene
@@ -30,10 +56,39 @@ export class Environment {
     this._buildLights();
     this._buildGround(holePositions);
     this._buildGrass(holePositions);
+    this._buildFlowers(holePositions);
     this._buildTrees();
     this._buildFences();
     this._buildRocks();
     this._buildClouds();
+  }
+
+  /** Lambert material with a wind-sway vertex displacement injected. */
+  _windMaterial(params, maxHeight) {
+    const mat = new THREE.MeshLambertMaterial(params);
+    const uniforms = this.uniforms;
+    const h2 = (maxHeight * maxHeight).toFixed(5);
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.uTime = uniforms.uTime;
+      shader.uniforms.uWind = uniforms.uWind;
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', `#include <common>
+          uniform float uTime;
+          uniform float uWind;`)
+        .replace('#include <begin_vertex>', `#include <begin_vertex>
+          #ifdef USE_INSTANCING
+          {
+            vec3 iPos = vec3(instanceMatrix[3][0], instanceMatrix[3][1], instanceMatrix[3][2]);
+            float ph = iPos.x * 0.35 + iPos.z * 0.55;
+            float sway = sin(uTime * 1.9 + ph) + 0.45 * sin(uTime * 3.3 + ph * 1.7);
+            float bend = clamp((transformed.y * transformed.y) / ${h2}, 0.0, 1.0);
+            transformed.x += sway * uWind * 0.09 * bend;
+            transformed.z += cos(uTime * 1.4 + ph) * uWind * 0.05 * bend;
+          }
+          #endif`);
+    };
+    mat.customProgramCacheKey = () => `wind-${h2}`;
+    return mat;
   }
 
   // ------------------------------------------------------------------ sky --
@@ -77,7 +132,7 @@ export class Environment {
 
   // --------------------------------------------------------------- lights --
   _buildLights() {
-    const hemi = new THREE.HemisphereLight(0xbfd9ff, 0x6a8f52, 0.85);
+    const hemi = new THREE.HemisphereLight(0xbfd9ff, 0x6a8f52, 0.45);
     this.scene.add(hemi);
 
     const sun = new THREE.DirectionalLight(0xfff2dd, 2.2);
@@ -173,33 +228,9 @@ export class Environment {
     blade.setAttribute('position', new THREE.BufferAttribute(verts, 3));
     blade.computeVertexNormals();
 
-    const mat = new THREE.MeshLambertMaterial({
-      color: 0xffffff,
-      side: THREE.DoubleSide,
-    });
-    const uniforms = this.uniforms;
-    mat.onBeforeCompile = (shader) => {
-      shader.uniforms.uTime = uniforms.uTime;
-      shader.uniforms.uWind = uniforms.uWind;
-      shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', `#include <common>
-          uniform float uTime;
-          uniform float uWind;`)
-        .replace('#include <begin_vertex>', `#include <begin_vertex>
-          #ifdef USE_INSTANCING
-          {
-            vec3 iPos = vec3(instanceMatrix[3][0], instanceMatrix[3][1], instanceMatrix[3][2]);
-            float ph = iPos.x * 0.35 + iPos.z * 0.55;
-            float sway = sin(uTime * 1.9 + ph) + 0.45 * sin(uTime * 3.3 + ph * 1.7);
-            float bend = (transformed.y * transformed.y) / ${(h * h).toFixed(4)};
-            transformed.x += sway * uWind * 0.09 * bend;
-            transformed.z += cos(uTime * 1.4 + ph) * uWind * 0.05 * bend;
-          }
-          #endif`);
-    };
-    mat.customProgramCacheKey = () => 'grass-wind';
+    const mat = this._windMaterial({ color: 0xffffff, side: THREE.DoubleSide }, h);
 
-    const COUNT = 2600;
+    const COUNT = 3400;
     const mesh = new THREE.InstancedMesh(blade, mat, COUNT);
     mesh.castShadow = false;
     mesh.receiveShadow = false;
@@ -221,6 +252,46 @@ export class Environment {
       dummy.updateMatrix();
       mesh.setMatrixAt(placed, dummy.matrix);
       color.setHSL(0.26 + Math.random() * 0.05, rand(0.45, 0.65), rand(0.28, 0.42));
+      mesh.setColorAt(placed, color);
+      placed++;
+    }
+    mesh.count = placed;
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    this.scene.add(mesh);
+  }
+
+  // -------------------------------------------------------------- flowers --
+  _buildFlowers(holePositions) {
+    // Stem + two crossed petal quads, one instanced draw call.
+    const stem = new THREE.PlaneGeometry(0.02, 0.26);
+    stem.translate(0, 0.13, 0);
+    const headA = new THREE.PlaneGeometry(0.11, 0.08);
+    headA.translate(0, 0.27, 0);
+    const headB = headA.clone();
+    headB.rotateY(Math.PI / 2);
+    const geo = mergeGeoms([stem, headA, headB]);
+
+    const mat = this._windMaterial({ color: 0xffffff, side: THREE.DoubleSide }, 0.28);
+    const COUNT = 240;
+    const mesh = new THREE.InstancedMesh(geo, mat, COUNT);
+    const dummy = new THREE.Object3D();
+    const color = new THREE.Color();
+    const petals = [0xffffff, 0xffd166, 0xf4a7c3, 0xc39bd3, 0xfff3a0];
+    let placed = 0, guard = 0;
+    while (placed < COUNT && guard++ < COUNT * 30) {
+      const a = Math.random() * Math.PI * 2;
+      const r = 3 + Math.pow(Math.random(), 0.8) * 40;
+      const x = Math.sin(a) * r;
+      const z = -Math.cos(a) * r;
+      if (holePositions.some((p) => (p.x - x) ** 2 + (p.z - z) ** 2 < 1.4)) continue;
+      dummy.position.set(x, 0, z);
+      dummy.rotation.y = Math.random() * Math.PI;
+      const s = rand(0.7, 1.3);
+      dummy.scale.setScalar(s);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(placed, dummy.matrix);
+      color.set(pick(petals));
       mesh.setColorAt(placed, color);
       placed++;
     }
