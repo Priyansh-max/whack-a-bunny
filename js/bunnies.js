@@ -10,11 +10,12 @@ import { audio } from './audio.js';
 const FUR_COLORS = [0xf2ede2, 0xb9b2a8, 0x8a6b4f, 0x6e6a66, 0xd9c8a9];
 
 function makeBunnyModel() {
-  const fur = new THREE.MeshLambertMaterial({ color: pick(FUR_COLORS) });
-  const furDark = new THREE.MeshLambertMaterial({ color: 0x5a4a3a });
+  // Slight emissive lift so bunnies read clearly against the dark dirt.
+  const fur = new THREE.MeshLambertMaterial({ color: pick(FUR_COLORS), emissive: 0x232323 });
+  const furDark = new THREE.MeshLambertMaterial({ color: 0x5a4a3a, emissive: 0x181818 });
   const pink = new THREE.MeshLambertMaterial({ color: 0xe8a0a8 });
   const black = new THREE.MeshLambertMaterial({ color: 0x1a1a1a });
-  const white = new THREE.MeshLambertMaterial({ color: 0xffffff });
+  const white = new THREE.MeshLambertMaterial({ color: 0xffffff, emissive: 0x303030 });
 
   const bunny = new THREE.Group();
   const headGroup = new THREE.Group();
@@ -89,8 +90,8 @@ function makeHole() {
   const group = new THREE.Group();
   // Dirt mound ring.
   const mound = new THREE.Mesh(
-    new THREE.TorusGeometry(0.55, 0.2, 10, 20),
-    new THREE.MeshLambertMaterial({ color: 0x5d4630 })
+    new THREE.TorusGeometry(0.62, 0.23, 10, 20),
+    new THREE.MeshLambertMaterial({ color: 0x6b5138 })
   );
   mound.rotation.x = -Math.PI / 2;
   mound.position.y = 0.06;
@@ -99,7 +100,7 @@ function makeHole() {
   group.add(mound);
   // Dark hole interior.
   const hole = new THREE.Mesh(
-    new THREE.CircleGeometry(0.52, 20),
+    new THREE.CircleGeometry(0.58, 20),
     new THREE.MeshBasicMaterial({ color: 0x120c06 })
   );
   hole.rotation.x = -Math.PI / 2;
@@ -113,6 +114,7 @@ function makeHole() {
 // Fake pop-ups only rise partway, cannot be hit and duck quickly.
 // ---------------------------------------------------------------------------
 const HIDDEN_Y = -1.25;
+const BASE_SCALE = 1.4; // bunnies read small past 15 m — scale them up
 
 export class Bunny {
   constructor(scene, position) {
@@ -131,9 +133,10 @@ export class Bunny {
     this.model.visible = false;
     this.root.add(this.model);
 
-    // Invisible hit sphere, scaled by difficulty at spawn time.
+    // Invisible hit sphere, scaled by difficulty at spawn time. The model
+    // is BASE_SCALE'd up, so this stays slightly smaller than before.
     this.hitMesh = new THREE.Mesh(
-      new THREE.SphereGeometry(0.46, 10, 10),
+      new THREE.SphereGeometry(0.38, 10, 10),
       new THREE.MeshBasicMaterial({ visible: false })
     );
     this.hitMesh.position.y = 0.55;
@@ -166,7 +169,7 @@ export class Bunny {
     this.popHeight = fake ? BUNNY.fakeHeight : 1;
     this.model.visible = true;
     this.model.rotation.set(0, rand(-0.4, 0.4), 0);
-    this.model.scale.setScalar(1);
+    this.model.scale.setScalar(BASE_SCALE);
     audio.bunnyPop();
     if (fake) audio.squeak(true);
     return true;
@@ -179,7 +182,8 @@ export class Bunny {
     this.dead = true;
     // Stylized red flash.
     for (const m of this.mats) {
-      m.userData.origColor = m.userData.origColor || m.color.getHex();
+      m.userData.origColor = m.userData.origColor ?? m.color.getHex();
+      m.userData.origEmissive = m.userData.origEmissive ?? (m.emissive ? m.emissive.getHex() : 0);
       m.color.setHex(0xd0352c);
       m.emissive = m.emissive || new THREE.Color();
       m.emissive.setHex(0x5a0d08);
@@ -191,7 +195,7 @@ export class Bunny {
   _restoreColors() {
     for (const m of this.mats) {
       if (m.userData.origColor !== undefined) m.color.setHex(m.userData.origColor);
-      if (m.emissive) m.emissive.setHex(0x000000);
+      if (m.emissive) m.emissive.setHex(m.userData.origEmissive ?? 0x000000);
     }
   }
 
@@ -257,7 +261,7 @@ export class Bunny {
         this.model.rotation.y += dt * (14 * (1 - k));
         this.model.rotation.z = Math.sin(k * Math.PI) * 0.7;
         this.model.position.y = HIDDEN_Y + (0 - HIDDEN_Y) * (1 - Ease.inCubic(k));
-        this.model.scale.setScalar(1 - k * 0.25);
+        this.model.scale.setScalar(BASE_SCALE * (1 - k * 0.25));
         if (k >= 1) this._bury();
         break;
       }
@@ -348,7 +352,7 @@ export class BunnyManager {
           const [minV, maxV] = this.difficulty.visibleTime;
           const fake = Math.random() < this.difficulty.fakeChance;
           const visible = fake ? rand(...BUNNY.fakeVisibleTime) : rand(minV, maxV);
-          b.popUp(visible, fake);
+          if (b.popUp(visible, fake) && this.onBunnyPop) this.onBunnyPop(b.root.position);
         }
       }
     }
