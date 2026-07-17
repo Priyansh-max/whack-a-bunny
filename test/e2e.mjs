@@ -22,7 +22,10 @@ const page = await browser.newPage();
 await page.setViewport({ width: 1600, height: 900 });
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
-page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+page.on('console', (m) => {
+  // The Vercel analytics script only exists on the deployed site, not locally.
+  if (m.type() === 'error' && !m.location()?.url?.includes('/_vercel/')) errors.push(m.text());
+});
 
 // --- 1. Menu loads ----------------------------------------------------------
 await page.goto(URL, { waitUntil: 'networkidle0' });
