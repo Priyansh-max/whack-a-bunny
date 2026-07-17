@@ -166,6 +166,11 @@ export class Weapon {
     shell.mesh.visible = true;
   }
 
+  /** World-space muzzle tip position (for tracers and smoke). */
+  getMuzzleWorld(out) {
+    return this.flash.getWorldPosition(out);
+  }
+
   /** Attempt to fire. Returns true if a shot went off. */
   fire() {
     if (!this.enabled || this.reloading || this.cooldown > 0) return false;

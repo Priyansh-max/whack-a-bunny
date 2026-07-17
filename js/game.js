@@ -9,7 +9,7 @@ import { audio } from './audio.js';
 import { recordHighScore } from './leaderboard.js';
 
 export class Game {
-  constructor({ scene, camera, renderer, env, manager, weapon, particles, decals, shake, ui }) {
+  constructor({ scene, camera, renderer, env, manager, weapon, particles, decals, shake, ui, tracers }) {
     this.scene = scene;
     this.camera = camera;
     this.renderer = renderer;
@@ -20,6 +20,11 @@ export class Game {
     this.decals = decals;
     this.shake = shake;
     this.ui = ui;
+    this.tracers = tracers;
+
+    this.BASE_FOV = 72;
+    this.fovKick = 0;
+    this.hitStopUntil = 0; // performance.now() timestamp; main loop reads this
 
     this.state = 'idle'; // idle | countdown | playing | paused | over
     this.difficulty = DIFFICULTIES.medium;
@@ -40,6 +45,7 @@ export class Game {
     this.raycaster = new THREE.Raycaster();
     this._center = new THREE.Vector2(0, 0);
     this._tmpV = new THREE.Vector3();
+    this._muzzle = new THREE.Vector3();
 
     this.score = 0;
     this.shots = 0;
@@ -138,6 +144,8 @@ export class Game {
     this.yaw = 0;
     this.pitch = 0;
     this.kick = 0;
+    this.fovKick = 0;
+    this.hitStopUntil = 0;
     this.decals.clear();
     this.weapon.reset();
     this.weapon.enabled = true;
@@ -213,26 +221,32 @@ export class Game {
 
     this.shots++;
     this.kick += 0.016;
+    this.fovKick = Math.min(this.fovKick + 1.3, 2.6);
     this.shake.add(0.16);
 
     this.raycaster.setFromCamera(this._center, this.camera);
+    const dir = this.raycaster.ray.direction;
+    let impactPoint = null;
 
     // Bunnies first.
     const targets = this.manager.hitTargets();
     const bunnyHits = this.raycaster.intersectObjects(targets, false);
+    let scored = false;
     if (bunnyHits.length) {
       const hit = bunnyHits[0];
       const bunny = hit.object.userData.bunny;
       if (bunny && bunny.hit()) {
+        scored = true;
+        impactPoint = hit.point;
         this.hits++;
         this.score += SCORE_PER_BUNNY;
-        const dir = this.raycaster.ray.direction;
         this.particles.blood(hit.point, dir);
         // Blood splat decal on the ground just behind the hole.
         this._tmpV.copy(hit.point).addScaledVector(dir, 0.7);
         this._tmpV.y = 0.02;
         this.decals.place(this._tmpV, new THREE.Vector3(0, 1, 0), 'splat');
         this.shake.add(0.22);
+        this.hitStopUntil = performance.now() + 50; // micro hit-stop for impact
         audio.hitConfirm();
         this.ui.hitmarker();
         this.ui.setScore(this.score);
@@ -241,24 +255,31 @@ export class Game {
         this.ui.scorePopup(this._toScreen(hit.point), `+${SCORE_PER_BUNNY}`);
         this.ui.setAmmo(this.weapon.ammo);
         this.ui.setShots(this.shots);
-        return;
       }
     }
 
-    // Environment impacts.
-    const envHits = this.raycaster.intersectObjects(this.env.raycastTargets, false);
-    if (envHits.length) {
-      const hit = envHits[0];
-      const type = hit.object.userData.impactType || 'dirt';
-      const normal = hit.face
-        ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld)
-        : new THREE.Vector3(0, 1, 0);
-      const dir = this.raycaster.ray.direction;
-      if (type === 'wood') { this.particles.wood(hit.point, dir); audio.impactWood(); }
-      else if (type === 'rock') { this.particles.rock(hit.point, dir); audio.impactDirt(); }
-      else { this.particles.dirt(hit.point, dir); audio.impactDirt(); }
-      this.decals.place(hit.point, normal, 'hole');
+    if (!scored) {
+      // Environment impacts.
+      const envHits = this.raycaster.intersectObjects(this.env.raycastTargets, false);
+      if (envHits.length) {
+        const hit = envHits[0];
+        impactPoint = hit.point;
+        const type = hit.object.userData.impactType || 'dirt';
+        const normal = hit.face
+          ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld)
+          : new THREE.Vector3(0, 1, 0);
+        if (type === 'wood') { this.particles.wood(hit.point, dir); audio.impactWood(); }
+        else if (type === 'rock') { this.particles.rock(hit.point, dir); audio.impactDirt(); }
+        else { this.particles.dirt(hit.point, dir); audio.impactDirt(); }
+        this.decals.place(hit.point, normal, 'hole');
+      }
     }
+
+    // Tracer + muzzle smoke on every shot.
+    this.weapon.getMuzzleWorld(this._muzzle);
+    if (!impactPoint) impactPoint = this.raycaster.ray.at(80, this._tmpV);
+    if (this.tracers) this.tracers.spawn(this._muzzle, impactPoint);
+    this.particles.muzzleSmoke(this._muzzle);
 
     this.ui.setShots(this.shots);
     this.ui.setAccuracy(this._accuracy());
@@ -286,8 +307,14 @@ export class Game {
       this.pitch = damp(this.pitch, -0.02, 2, dt);
     }
 
-    // Recoil pitch kick recovery.
+    // Recoil pitch kick recovery + FOV punch recovery.
     this.kick = damp(this.kick, 0, 12, dt);
+    this.fovKick = damp(this.fovKick, 0, 9, dt);
+    const targetFov = this.BASE_FOV + this.fovKick;
+    if (Math.abs(this.camera.fov - targetFov) > 0.01) {
+      this.camera.fov = targetFov;
+      this.camera.updateProjectionMatrix();
+    }
 
     this.shake.update(dt);
     this.shake.getOffset(this._shakeOut);

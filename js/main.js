@@ -6,6 +6,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 import { HOLE_LAYOUT } from './config.js';
 import { updateTweens } from './utils.js';
@@ -14,7 +15,7 @@ import { Environment } from './environment.js';
 import { AmbientFX } from './ambient.js';
 import { BunnyManager } from './bunnies.js';
 import { Weapon } from './weapon.js';
-import { ParticleSystem, DecalPool, CameraShake } from './effects.js';
+import { ParticleSystem, DecalPool, CameraShake, TracerPool } from './effects.js';
 import { Game } from './game.js';
 import { UI } from './ui.js';
 import { addScore } from './leaderboard.js';
@@ -57,8 +58,11 @@ async function boot() {
   document.getElementById('game-container').appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
+  // Image-based lighting so metals (gun, shells) read as real materials.
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
   const camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.05, 600);
-  uiRef.setLoadProgress(0.2);
+  uiRef.setLoadProgress(0.25);
   await nextFrame();
 
   // --- World ----------------------------------------------------------------
@@ -79,6 +83,7 @@ async function boot() {
   const particles = new ParticleSystem(scene);
   const decals = new DecalPool(scene);
   const shake = new CameraShake();
+  const tracers = new TracerPool(scene);
   uiRef.setLoadProgress(0.8);
   await nextFrame();
 
@@ -91,7 +96,7 @@ async function boot() {
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
 
-  game = new Game({ scene, camera, renderer, env, manager, weapon, particles, decals, shake, ui: uiRef });
+  game = new Game({ scene, camera, renderer, env, manager, weapon, particles, decals, shake, ui: uiRef, tracers });
   uiRef.setLoadProgress(1);
   await nextFrame();
 
@@ -137,7 +142,9 @@ async function boot() {
   let fpsTime = 0;
 
   renderer.setAnimationLoop(() => {
-    const dt = Math.min(clock.getDelta(), 0.05);
+    // Hit-stop: brief global slow-down when a bunny is whacked.
+    const slowmo = performance.now() < game.hitStopUntil ? 0.12 : 1;
+    const dt = Math.min(clock.getDelta(), 0.05) * slowmo;
     elapsed += dt;
 
     updateTweens(dt);
@@ -146,6 +153,7 @@ async function boot() {
     game.update(dt);
     particles.update(dt);
     decals.update(dt);
+    tracers.update(dt);
     uiRef.update(dt);
 
     composer.render();

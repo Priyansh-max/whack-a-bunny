@@ -185,6 +185,59 @@ export class ParticleSystem {
       size: [0.02, 0.04], lifeTime: [0.1, 0.25], gravity: 4,
     });
   }
+
+  muzzleSmoke(position) {
+    this.spawn({
+      position, count: 3,
+      colors: [0x9a9a98, 0x7d7d7b],
+      speed: [0.15, 0.5], spread: 1,
+      size: [0.08, 0.2], lifeTime: [0.5, 0.95],
+      gravity: -1.2, alpha: 0.22,
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Tracers — brief glowing streaks from muzzle to impact point.
+// ---------------------------------------------------------------------------
+export class TracerPool {
+  constructor(scene) {
+    this.tracers = [];
+    const geo = new THREE.CylinderGeometry(0.007, 0.007, 1, 5, 1, true);
+    geo.rotateX(Math.PI / 2); // align along +Z so lookAt() points it correctly
+    for (let i = 0; i < 6; i++) {
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0xffe2a0, transparent: true, opacity: 0,
+        blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.visible = false;
+      mesh.frustumCulled = false;
+      scene.add(mesh);
+      this.tracers.push({ mesh, life: 0, maxLife: 0 });
+    }
+  }
+
+  spawn(from, to) {
+    const t = this.tracers.find((x) => !x.mesh.visible) || this.tracers[0];
+    const dist = from.distanceTo(to);
+    if (dist < 0.5) return;
+    t.mesh.position.copy(from);
+    t.mesh.lookAt(to);
+    t.mesh.scale.set(1, 1, dist);
+    t.mesh.material.opacity = 0.85;
+    t.mesh.visible = true;
+    t.life = t.maxLife = 0.08;
+  }
+
+  update(dt) {
+    for (const t of this.tracers) {
+      if (!t.mesh.visible) continue;
+      t.life -= dt;
+      t.mesh.material.opacity = Math.max(0, (t.life / t.maxLife)) * 0.85;
+      if (t.life <= 0) t.mesh.visible = false;
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
