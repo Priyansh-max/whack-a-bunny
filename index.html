@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Whack-a-Bunny — Arcade FPS</title>
+<link rel="stylesheet" href="css/style.css" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐰</text></svg>" />
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/three.module.js",
+    "three/addons/": "./vendor/three/addons/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="app">
+  <!-- 3D viewport -->
+  <div id="game-container"></div>
+
+  <!-- Post overlays -->
+  <div id="vignette"></div>
+  <div id="popup-layer"></div>
+
+  <!-- Crosshair + hitmarker -->
+  <div id="crosshair">
+    <span class="ch-line ch-top"></span>
+    <span class="ch-line ch-bottom"></span>
+    <span class="ch-line ch-left"></span>
+    <span class="ch-line ch-right"></span>
+    <span class="ch-dot"></span>
+    <div id="hitmarker">
+      <span></span><span></span><span></span><span></span>
+    </div>
+  </div>
+
+  <!-- HUD -->
+  <div id="hud">
+    <div class="hud-top-left glass">
+      <div class="hud-label">Score</div>
+      <div id="hud-score" class="hud-big">0</div>
+      <div class="hud-sub">Best <span id="hud-high">0</span></div>
+    </div>
+    <div class="hud-top-center glass">
+      <div id="hud-time" class="hud-big">1:00</div>
+      <div class="hud-sub" id="hud-difficulty">Medium</div>
+    </div>
+    <div class="hud-top-right glass">
+      <div class="hud-stat"><span>Accuracy</span><b id="hud-accuracy">100%</b></div>
+      <div class="hud-stat"><span>Shots</span><b id="hud-shots">0</b></div>
+      <div class="hud-stat"><span>Bunnies</span><b id="hud-hits">0</b></div>
+      <div class="hud-stat dim"><span id="hud-fps">60 FPS</span></div>
+    </div>
+    <div class="hud-bottom-right">
+      <div id="hud-ammo"></div>
+      <div class="hud-sub">R to reload</div>
+    </div>
+  </div>
+
+  <!-- Countdown -->
+  <div id="countdown-overlay">
+    <div id="countdown-number">3</div>
+  </div>
+
+  <!-- ============================ SCREENS ============================ -->
+  <div id="screen-loading" class="screen active">
+    <div class="panel glass-strong loading-panel">
+      <h1 class="logo">WHACK<span>-A-</span>BUNNY</h1>
+      <div class="load-track"><div id="load-bar"></div></div>
+      <div id="load-label">0%</div>
+    </div>
+  </div>
+
+  <div id="screen-menu" class="screen">
+    <div class="panel glass-strong menu-panel">
+      <h1 class="logo">WHACK<span>-A-</span>BUNNY</h1>
+      <p class="tagline">The meadow is overrun. Lock &amp; load.</p>
+      <nav class="menu-buttons">
+        <button id="btn-play" class="btn btn-primary">▶&nbsp; Play</button>
+        <button id="btn-leaderboard" class="btn">🏆&nbsp; Leaderboard</button>
+        <button id="btn-settings" class="btn">⚙&nbsp; Settings</button>
+        <button id="btn-exit" class="btn btn-dim">✕&nbsp; Exit</button>
+      </nav>
+      <p id="touch-note">Tip: best experienced with mouse &amp; keyboard — touch: drag to aim, tap to shoot.</p>
+    </div>
+  </div>
+
+  <div id="screen-difficulty" class="screen">
+    <div class="panel glass-strong wide-panel">
+      <h2 class="panel-title">Choose Difficulty</h2>
+      <div class="diff-grid">
+        <button class="diff-card glass" data-diff="easy">
+          <span class="diff-name easy">Easy</span>
+          <span class="diff-desc">Relaxed pace · big targets<br />90 seconds</span>
+          <span class="diff-best">Best: 0</span>
+        </button>
+        <button class="diff-card glass" data-diff="medium">
+          <span class="diff-name medium">Medium</span>
+          <span class="diff-desc">Brisk pace · standard targets<br />60 seconds</span>
+          <span class="diff-best">Best: 0</span>
+        </button>
+        <button class="diff-card glass" data-diff="hard">
+          <span class="diff-name hard">Hard</span>
+          <span class="diff-desc">Frantic pace · small targets<br />fake-outs · 45 seconds</span>
+          <span class="diff-best">Best: 0</span>
+        </button>
+      </div>
+      <button id="btn-diff-back" class="btn btn-dim">← Back</button>
+    </div>
+  </div>
+
+  <div id="screen-leaderboard" class="screen">
+    <div class="panel glass-strong wide-panel">
+      <h2 class="panel-title">🏆 Leaderboard</h2>
+      <div class="table-wrap">
+        <table class="lb-table">
+          <thead>
+            <tr><th>#</th><th>Name</th><th>Score</th><th>Difficulty</th><th>Accuracy</th><th>Date</th></tr>
+          </thead>
+          <tbody id="leaderboard-body"></tbody>
+        </table>
+      </div>
+      <button id="btn-lb-back" class="btn btn-dim">← Back</button>
+    </div>
+  </div>
+
+  <div id="screen-settings" class="screen">
+    <div class="panel glass-strong">
+      <h2 class="panel-title">Settings</h2>
+      <div class="setting-row">
+        <label for="set-sound">🔊 Sound</label>
+        <input type="range" id="set-sound" min="0" max="1" step="0.01" />
+        <span id="set-sound-val" class="setting-val">80%</span>
+      </div>
+      <div class="setting-row">
+        <label for="set-music">🎵 Music &amp; Ambience</label>
+        <input type="range" id="set-music" min="0" max="1" step="0.01" />
+        <span id="set-music-val" class="setting-val">60%</span>
+      </div>
+      <div class="setting-row">
+        <label for="set-sensitivity">🖱 Mouse Sensitivity</label>
+        <input type="range" id="set-sensitivity" min="0.2" max="3" step="0.05" />
+        <span id="set-sensitivity-val" class="setting-val">1.00×</span>
+      </div>
+      <button id="btn-set-back" class="btn btn-dim">← Back</button>
+    </div>
+  </div>
+
+  <div id="screen-pause" class="screen">
+    <div class="panel glass-strong">
+      <h2 class="panel-title">Paused</h2>
+      <nav class="menu-buttons">
+        <button id="btn-resume" class="btn btn-primary">Resume</button>
+        <button id="btn-restart" class="btn">Restart</button>
+        <button id="btn-quit" class="btn btn-dim">Quit to Menu</button>
+      </nav>
+    </div>
+  </div>
+
+  <div id="screen-results" class="screen">
+    <div class="panel glass-strong results-panel">
+      <h2 class="panel-title">Time's Up!</h2>
+      <div class="res-score-wrap">
+        <div class="hud-label">Final Score</div>
+        <div id="res-score" class="res-score">0</div>
+      </div>
+      <div class="res-stats">
+        <div class="stat-row"><span>Bunnies whacked</span><b id="res-hits">0</b></div>
+        <div class="stat-row"><span>Shots fired</span><b id="res-shots">0</b></div>
+        <div class="stat-row"><span>Accuracy</span><b id="res-accuracy">0%</b></div>
+        <div class="stat-row"><span>Difficulty</span><b id="res-difficulty">—</b></div>
+        <div class="stat-row"><span>Best (this difficulty)</span><b id="res-high">0</b></div>
+      </div>
+      <div class="save-row">
+        <input id="res-name" maxlength="16" placeholder="Your name" autocomplete="off" />
+        <button id="btn-save-score" class="btn btn-primary">Save Score</button>
+      </div>
+      <nav class="menu-buttons row">
+        <button id="btn-again" class="btn">↻ Play Again</button>
+        <button id="btn-menu" class="btn btn-dim">Main Menu</button>
+      </nav>
+    </div>
+  </div>
+
+  <div id="screen-exit" class="screen">
+    <div class="panel glass-strong">
+      <h2 class="panel-title">Thanks for playing!</h2>
+      <p class="tagline">The bunnies will regroup… You can close this tab now.</p>
+      <button id="btn-exit-back" class="btn btn-primary">← Back to Menu</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
